@@ -16,4 +16,16 @@ pub enum Command {
         /// Session ID to upload
         session_id: String,
     },
+
+    #[cfg(feature = "auth")]
+    /// Authenticate with the Replay server
+    Login,
+
+    #[cfg(feature = "auth")]
+    /// Remove stored credentials
+    Logout,
+
+    #[cfg(feature = "auth")]
+    /// Show current authenticated user
+    Whoami,
 }

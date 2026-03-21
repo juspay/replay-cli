@@ -7,6 +7,10 @@ edition = "2021"
 name = "replay"
 path = "src/main.rs"
 
+[features]
+default = []
+auth = ["dep:tiny_http", "dep:reqwest", "dep:open", "dep:rand"]
+
 [dependencies]
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
@@ -14,6 +18,10 @@ clap = { version = "4", features = ["derive"] }
 crossterm = "0.28"
 dirs = "6"
 nucleo-matcher = "0.3"
+open = { version = "5", optional = true }
+rand = { version = "0.9", optional = true }
 ratatui = "0.30"
+reqwest = { version = "0.12", features = ["blocking", "json"], optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tiny_http = { version = "0.12", optional = true }

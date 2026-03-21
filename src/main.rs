@@ -1,3 +1,5 @@
+#[cfg(feature = "auth")]
+mod auth;
 mod cli;
 mod models;
 mod providers;
@@ -21,6 +23,12 @@ fn main() -> Result<()> {
     match cli.command {
         None | Some(Command::Browse) => run_browse(),
         Some(Command::Upload { session_id }) => run_upload(&session_id),
+        #[cfg(feature = "auth")]
+        Some(Command::Login) => auth::login(),
+        #[cfg(feature = "auth")]
+        Some(Command::Logout) => auth::logout(),
+        #[cfg(feature = "auth")]
+        Some(Command::Whoami) => auth::whoami(),
     }
 }
 
