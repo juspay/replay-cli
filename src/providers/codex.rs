@@ -6,7 +6,7 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
 use super::SessionProvider;
-use crate::models::{Agent, Message, Role, Session};
+use crate::models::{Agent, ContentBlock, Message, Role, Session};
 
 pub struct CodexProvider;
 
@@ -30,7 +30,7 @@ impl CodexProvider {
         }
     }
 
-    /// Extract text from a Codex content array, looking for entries of a given type.
+    /// Extract plain text from content array for a given type (discovery preview only).
     fn extract_content_text(content: &Value, content_type: &str) -> Option<String> {
         let arr = content.as_array()?;
         let texts: Vec<&str> = arr
@@ -49,6 +49,31 @@ impl CodexProvider {
         } else {
             Some(texts.join("\n"))
         }
+    }
+
+    /// Parse content blocks from Codex response_item format.
+    fn parse_content_blocks(content: &Value) -> Vec<ContentBlock> {
+        let arr = match content.as_array() {
+            Some(a) => a,
+            None => return Vec::new(),
+        };
+
+        arr.iter()
+            .filter_map(|entry| {
+                let t = entry.get("type")?.as_str()?;
+                match t {
+                    "input_text" | "output_text" => {
+                        let text = entry.get("text")?.as_str()?.to_string();
+                        if text.is_empty() {
+                            None
+                        } else {
+                            Some(ContentBlock::Text { text })
+                        }
+                    }
+                    _ => None,
+                }
+            })
+            .collect()
     }
 }
 
@@ -77,6 +102,7 @@ impl SessionProvider for CodexProvider {
             let mut git_branch: Option<String> = None;
             let mut session_ts: Option<DateTime<Utc>> = None;
             let mut first_user_msg: Option<String> = None;
+            let mut model: Option<String> = None;
 
             for line in reader.lines() {
                 let line = match line {
@@ -110,6 +136,10 @@ impl SessionProvider for CodexProvider {
                             .get("timestamp")
                             .and_then(|v| v.as_str())
                             .and_then(|s| s.parse::<DateTime<Utc>>().ok());
+                        model = payload
+                            .get("model")
+                            .and_then(|v| v.as_str())
+                            .map(String::from);
                     }
                 }
 
@@ -146,6 +176,9 @@ impl SessionProvider for CodexProvider {
                 git_branch,
                 first_user_message: first_user_msg,
                 source_path: path,
+                title: None,
+                cli_version: None,
+                model,
             });
         }
 
@@ -202,26 +235,31 @@ impl SessionProvider for CodexProvider {
                 None => continue,
             };
 
-            let (role, text) = match role_str {
+            let (role, blocks) = match role_str {
                 "developer" | "user" => {
-                    match Self::extract_content_text(content, "input_text") {
-                        Some(t) if !t.is_empty() => (Role::User, t),
-                        _ => continue,
+                    let blocks = Self::parse_content_blocks(content);
+                    if blocks.is_empty() {
+                        continue;
                     }
+                    (Role::User, blocks)
                 }
                 "assistant" => {
-                    match Self::extract_content_text(content, "output_text") {
-                        Some(t) if !t.is_empty() => (Role::Assistant, t),
-                        _ => continue,
+                    let blocks = Self::parse_content_blocks(content);
+                    if blocks.is_empty() {
+                        continue;
                     }
+                    (Role::Assistant, blocks)
                 }
                 _ => continue,
             };
 
             messages.push(Message {
                 role,
-                text,
+                content: blocks,
                 timestamp,
+                model: None,
+                stop_reason: None,
+                usage: None,
             });
         }
 

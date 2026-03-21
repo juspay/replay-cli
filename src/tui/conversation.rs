@@ -99,8 +99,9 @@ fn render_messages(f: &mut Frame, app: &App, area: Rect) {
             Role::Assistant => Style::default(),
         };
 
-        for text_line in msg.text.lines() {
-            lines.push(Line::from(Span::styled(text_line, text_style)));
+        let display = msg.display_text();
+        for text_line in display.lines() {
+            lines.push(Line::from(Span::styled(text_line.to_string(), text_style)));
         }
     }
 

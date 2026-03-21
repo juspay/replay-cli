@@ -8,7 +8,7 @@ name = "replay"
 path = "src/main.rs"
 
 [features]
-default = []
+default = ["auth"]
 auth = ["dep:tiny_http", "dep:reqwest", "dep:open", "dep:rand"]
 
 [dependencies]

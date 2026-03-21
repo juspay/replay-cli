@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,17 +26,71 @@ impl std::fmt::Display for Agent {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Role {
     User,
     Assistant,
 }
 
+/// A single content block within a message.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type")]
+pub enum ContentBlock {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "thinking")]
+    Thinking { thinking: String },
+    #[serde(rename = "tool_use")]
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    #[serde(rename = "tool_result")]
+    ToolResult {
+        tool_use_id: String,
+        content: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TokenUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_creation_input_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_read_input_tokens: Option<u64>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Message {
     pub role: Role,
-    pub text: String,
+    pub content: Vec<ContentBlock>,
     pub timestamp: DateTime<Utc>,
+    /// Model used (assistant messages only).
+    pub model: Option<String>,
+    /// Why the turn ended (assistant messages only).
+    pub stop_reason: Option<String>,
+    /// Token usage (assistant messages only).
+    pub usage: Option<TokenUsage>,
+}
+
+impl Message {
+    /// Extract display-friendly text from content blocks.
+    /// Concatenates all Text blocks, ignoring thinking/tool_use/tool_result.
+    pub fn display_text(&self) -> String {
+        let texts: Vec<&str> = self
+            .content
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        texts.join("\n")
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +102,12 @@ pub struct Session {
     pub git_branch: Option<String>,
     pub first_user_message: Option<String>,
     pub source_path: PathBuf,
+    /// Session title (from custom-title or agent-name).
+    pub title: Option<String>,
+    /// CLI version that created this session.
+    pub cli_version: Option<String>,
+    /// Primary model used in this session.
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone)]

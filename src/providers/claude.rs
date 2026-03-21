@@ -6,7 +6,7 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
 use super::SessionProvider;
-use crate::models::{Agent, Message, Role, Session};
+use crate::models::{Agent, ContentBlock, Message, Role, Session, TokenUsage};
 
 pub struct ClaudeProvider;
 
@@ -33,8 +33,7 @@ impl ClaudeProvider {
         }
     }
 
-    /// Extract text from a user message content field.
-    /// Content can be a plain String or an Array of objects (with type "text"/"tool_result").
+    /// Extract plain text from a user message content field (for discovery preview only).
     fn extract_user_text(content: &Value) -> Option<String> {
         match content {
             Value::String(s) => Some(s.clone()),
@@ -60,26 +59,55 @@ impl ClaudeProvider {
         }
     }
 
-    /// Extract text from an assistant message content array.
-    /// Collect entries where type == "text", skip "thinking", "tool_use", "tool_result".
-    fn extract_assistant_text(content: &Value) -> Option<String> {
-        let arr = content.as_array()?;
-        let texts: Vec<&str> = arr
-            .iter()
-            .filter_map(|entry| {
-                let t = entry.get("type")?.as_str()?;
-                if t == "text" {
-                    entry.get("text")?.as_str()
-                } else {
-                    None
-                }
-            })
-            .collect();
-        if texts.is_empty() {
-            None
-        } else {
-            Some(texts.join("\n"))
+    /// Parse content blocks from the Anthropic Messages API format.
+    fn parse_content_blocks(content: &Value) -> Vec<ContentBlock> {
+        match content {
+            Value::String(s) => vec![ContentBlock::Text { text: s.clone() }],
+            Value::Array(arr) => arr
+                .iter()
+                .filter_map(|entry| {
+                    let t = entry.get("type")?.as_str()?;
+                    match t {
+                        "text" => {
+                            let text = entry.get("text")?.as_str()?.to_string();
+                            Some(ContentBlock::Text { text })
+                        }
+                        "thinking" => {
+                            let thinking = entry.get("thinking")?.as_str()?.to_string();
+                            Some(ContentBlock::Thinking { thinking })
+                        }
+                        "tool_use" => {
+                            let id = entry.get("id")?.as_str()?.to_string();
+                            let name = entry.get("name")?.as_str()?.to_string();
+                            let input = entry.get("input").cloned().unwrap_or(Value::Object(Default::default()));
+                            Some(ContentBlock::ToolUse { id, name, input })
+                        }
+                        "tool_result" => {
+                            let tool_use_id = entry.get("tool_use_id")?.as_str()?.to_string();
+                            let content = match entry.get("content") {
+                                Some(Value::String(s)) => s.clone(),
+                                Some(other) => other.to_string(),
+                                None => String::new(),
+                            };
+                            Some(ContentBlock::ToolResult { tool_use_id, content })
+                        }
+                        _ => None,
+                    }
+                })
+                .collect(),
+            _ => Vec::new(),
         }
+    }
+
+    /// Parse token usage from the message object.
+    fn parse_usage(message: &Value) -> Option<TokenUsage> {
+        let usage = message.get("usage")?;
+        Some(TokenUsage {
+            input_tokens: usage.get("input_tokens")?.as_u64()?,
+            output_tokens: usage.get("output_tokens")?.as_u64()?,
+            cache_creation_input_tokens: usage.get("cache_creation_input_tokens").and_then(|v| v.as_u64()),
+            cache_read_input_tokens: usage.get("cache_read_input_tokens").and_then(|v| v.as_u64()),
+        })
     }
 }
 
@@ -108,6 +136,9 @@ impl SessionProvider for ClaudeProvider {
             let mut git_branch: Option<String> = None;
             let mut first_user_msg: Option<String> = None;
             let mut earliest_ts: Option<DateTime<Utc>> = None;
+            let mut cli_version: Option<String> = None;
+            let mut model: Option<String> = None;
+            let mut title: Option<String> = None;
 
             for line in reader.lines() {
                 let line = match line {
@@ -137,29 +168,60 @@ impl SessionProvider for ClaudeProvider {
                     None => continue,
                 };
 
-                if line_type == "user" && first_user_msg.is_none() {
-                    if session_id.is_none() {
-                        session_id =
-                            val.get("sessionId").and_then(|v| v.as_str()).map(String::from);
+                match line_type {
+                    "user" => {
+                        if session_id.is_none() {
+                            session_id =
+                                val.get("sessionId").and_then(|v| v.as_str()).map(String::from);
+                        }
+                        if cwd.is_none() {
+                            cwd = val.get("cwd").and_then(|v| v.as_str()).map(String::from);
+                        }
+                        if git_branch.is_none() {
+                            git_branch = val
+                                .get("gitBranch")
+                                .and_then(|v| v.as_str())
+                                .map(String::from);
+                        }
+                        if cli_version.is_none() {
+                            cli_version = val
+                                .get("version")
+                                .and_then(|v| v.as_str())
+                                .map(String::from);
+                        }
+                        if first_user_msg.is_none() {
+                            if let Some(content) =
+                                val.get("message").and_then(|m| m.get("content"))
+                            {
+                                first_user_msg = Self::extract_user_text(content);
+                            }
+                        }
                     }
-                    if cwd.is_none() {
-                        cwd = val.get("cwd").and_then(|v| v.as_str()).map(String::from);
+                    "assistant" => {
+                        if model.is_none() {
+                            model = val
+                                .get("message")
+                                .and_then(|m| m.get("model"))
+                                .and_then(|v| v.as_str())
+                                .map(String::from);
+                        }
                     }
-                    if git_branch.is_none() {
-                        git_branch = val
-                            .get("gitBranch")
+                    "custom-title" => {
+                        title = val
+                            .get("customTitle")
                             .and_then(|v| v.as_str())
                             .map(String::from);
                     }
-
-                    if let Some(content) = val.get("message").and_then(|m| m.get("content")) {
-                        first_user_msg = Self::extract_user_text(content);
+                    "agent-name" => {
+                        // Use agent-name as fallback title
+                        if title.is_none() {
+                            title = val
+                                .get("agentName")
+                                .and_then(|v| v.as_str())
+                                .map(String::from);
+                        }
                     }
-                }
-
-                // Once we have what we need, stop scanning
-                if session_id.is_some() && first_user_msg.is_some() && earliest_ts.is_some() {
-                    break;
+                    _ => {}
                 }
             }
 
@@ -180,6 +242,9 @@ impl SessionProvider for ClaudeProvider {
                 git_branch,
                 first_user_message: first_user_msg,
                 source_path: path,
+                title,
+                cli_version,
+                model,
             });
         }
 
@@ -219,37 +284,44 @@ impl SessionProvider for ClaudeProvider {
             match line_type {
                 "user" => {
                     if let Some(content) = val.get("message").and_then(|m| m.get("content")) {
-                        // Skip tool_result messages (they have content as array with tool_result entries)
-                        if let Value::Array(arr) = content {
-                            let has_only_tool_results = arr.iter().all(|e| {
-                                e.get("type").and_then(|t| t.as_str()) == Some("tool_result")
-                            });
-                            if has_only_tool_results {
-                                continue;
-                            }
+                        let blocks = Self::parse_content_blocks(content);
+                        if blocks.is_empty() {
+                            continue;
                         }
-
-                        if let Some(text) = Self::extract_user_text(content) {
-                            if !text.is_empty() {
-                                messages.push(Message {
-                                    role: Role::User,
-                                    text,
-                                    timestamp,
-                                });
-                            }
-                        }
+                        messages.push(Message {
+                            role: Role::User,
+                            content: blocks,
+                            timestamp,
+                            model: None,
+                            stop_reason: None,
+                            usage: None,
+                        });
                     }
                 }
                 "assistant" => {
-                    if let Some(content) = val.get("message").and_then(|m| m.get("content")) {
-                        if let Some(text) = Self::extract_assistant_text(content) {
-                            if !text.is_empty() {
-                                messages.push(Message {
-                                    role: Role::Assistant,
-                                    text,
-                                    timestamp,
-                                });
+                    if let Some(msg_obj) = val.get("message") {
+                        if let Some(content) = msg_obj.get("content") {
+                            let blocks = Self::parse_content_blocks(content);
+                            if blocks.is_empty() {
+                                continue;
                             }
+                            let model = msg_obj
+                                .get("model")
+                                .and_then(|v| v.as_str())
+                                .map(String::from);
+                            let stop_reason = msg_obj
+                                .get("stop_reason")
+                                .and_then(|v| v.as_str())
+                                .map(String::from);
+                            let usage = Self::parse_usage(msg_obj);
+                            messages.push(Message {
+                                role: Role::Assistant,
+                                content: blocks,
+                                timestamp,
+                                model,
+                                stop_reason,
+                                usage,
+                            });
                         }
                     }
                 }
