@@ -2,7 +2,7 @@ use nucleo_matcher::pattern::{AtomKind, CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 
 use crate::models::{Agent, LoadedSession, Session};
-use crate::providers::SessionProvider;
+use crate::providers::{load_session_messages, SessionProvider};
 use crate::upload::Uploader;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,6 +77,7 @@ pub struct App {
     pub loaded_session: Option<LoadedSession>,
     pub scroll_offset: u16,
     pub upload_status: Option<String>,
+    pub picker_status: Option<String>,
 
     // Dependencies
     pub providers: Vec<Box<dyn SessionProvider>>,
@@ -102,6 +103,7 @@ impl App {
             loaded_session: None,
             scroll_offset: 0,
             upload_status: None,
+            picker_status: None,
             providers,
             uploader,
         }
@@ -133,8 +135,8 @@ impl App {
             }
             Msg::PageDown => {
                 if !self.filtered_indices.is_empty() {
-                    self.selected_index = (self.selected_index + 10)
-                        .min(self.filtered_indices.len() - 1);
+                    self.selected_index =
+                        (self.selected_index + 10).min(self.filtered_indices.len() - 1);
                 }
             }
             Msg::Select => {
@@ -218,9 +220,8 @@ impl App {
         let idx = self.filtered_indices[self.selected_index];
         let session = &self.all_sessions[idx];
 
-        // Try loading messages from providers
-        for p in &self.providers {
-            if let Ok(messages) = p.load_messages(session) {
+        match load_session_messages(&self.providers, session) {
+            Ok(messages) => {
                 self.loaded_session = Some(LoadedSession {
                     session: session.clone(),
                     messages,
@@ -228,7 +229,10 @@ impl App {
                 self.view = View::Conversation;
                 self.scroll_offset = 0;
                 self.upload_status = None;
-                return;
+                self.picker_status = None;
+            }
+            Err(err) => {
+                self.picker_status = Some(format!("ERROR: {}", err));
             }
         }
     }
@@ -261,9 +265,7 @@ impl App {
                         s.first_user_message.as_deref().unwrap_or(""),
                     );
                     let haystack_utf32 = Utf32Str::new(&haystack, &mut buf);
-                    pattern
-                        .score(haystack_utf32, &mut self.matcher)
-                        .is_some()
+                    pattern.score(haystack_utf32, &mut self.matcher).is_some()
                 })
                 .collect();
         }

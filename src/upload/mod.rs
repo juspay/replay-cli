@@ -51,11 +51,16 @@ pub struct HttpUploader {
 
 impl HttpUploader {
     fn do_upload(&self, loaded: &LoadedSession) -> Result<()> {
+        ensure_uploadable(loaded)?;
+
         let payload = UploadRequest {
             session: SessionPayload {
                 id: loaded.session.id.clone(),
                 agent: loaded.session.agent.to_string(),
-                timestamp: loaded.session.timestamp.to_rfc3339_opts(SecondsFormat::Millis, true),
+                timestamp: loaded
+                    .session
+                    .timestamp
+                    .to_rfc3339_opts(SecondsFormat::Millis, true),
                 project_path: loaded.session.project_path.clone(),
                 git_branch: loaded.session.git_branch.clone(),
                 title: loaded.session.title.clone(),
@@ -118,19 +123,31 @@ impl HttpUploader {
                     Err(anyhow!("Re-upload failed (HTTP {status}): {error}"))
                 }
             }
-            401 => Err(anyhow!(
-                "Not authenticated. Run `replay login` first."
-            )),
+            401 => Err(anyhow!("Not authenticated. Run `replay login` first.")),
             403 => Err(anyhow!("Upload rejected by server.")),
             400 => {
                 let body: serde_json::Value = resp.json()?;
                 let error = body["error"].as_str().unwrap_or("Invalid request");
-                let details = body.get("details").map(|d| d.to_string()).unwrap_or_default();
+                let details = body
+                    .get("details")
+                    .map(|d| d.to_string())
+                    .unwrap_or_default();
                 Err(anyhow!("Upload failed: {error}\n{details}"))
             }
             status => Err(anyhow!("Unexpected response: HTTP {status}")),
         }
     }
+}
+
+fn ensure_uploadable(loaded: &LoadedSession) -> Result<()> {
+    if loaded.messages.is_empty() {
+        return Err(anyhow!(
+            "Session '{}' has no exportable messages",
+            loaded.session.id
+        ));
+    }
+
+    Ok(())
 }
 
 impl Uploader for HttpUploader {
@@ -150,5 +167,58 @@ impl Uploader for LazyUploader {
         let server_url = crate::auth::config::server_url();
         let uploader = HttpUploader { server_url, token };
         uploader.do_upload(session)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use chrono::Utc;
+
+    use super::*;
+    use crate::models::{Agent, Message, Session};
+
+    fn sample_loaded_session(messages: Vec<Message>) -> LoadedSession {
+        LoadedSession {
+            session: Session {
+                id: "session-1".to_string(),
+                agent: Agent::Codex,
+                timestamp: Utc::now(),
+                project_path: None,
+                git_branch: None,
+                first_user_message: None,
+                source_path: PathBuf::from("rollout.jsonl"),
+                title: None,
+                cli_version: None,
+                model: None,
+            },
+            messages,
+        }
+    }
+
+    fn sample_message() -> Message {
+        Message {
+            role: Role::Assistant,
+            content: vec![ContentBlock::Text {
+                text: "done".to_string(),
+            }],
+            timestamp: Utc::now(),
+            model: None,
+            stop_reason: None,
+            usage: None,
+        }
+    }
+
+    #[test]
+    fn rejects_empty_uploads_before_request_construction() {
+        let err = ensure_uploadable(&sample_loaded_session(Vec::new())).unwrap_err();
+
+        assert!(err.to_string().contains("has no exportable messages"));
+    }
+
+    #[test]
+    fn allows_non_empty_uploads() {
+        ensure_uploadable(&sample_loaded_session(vec![sample_message()])).unwrap();
     }
 }

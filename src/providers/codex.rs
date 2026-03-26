@@ -78,6 +78,10 @@ impl CodexProvider {
 }
 
 impl SessionProvider for CodexProvider {
+    fn agent(&self) -> Agent {
+        Agent::Codex
+    }
+
     fn discover(&self) -> Result<Vec<Session>> {
         let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home dir"))?;
         let sessions_dir = home.join(".codex").join("sessions");
@@ -126,7 +130,10 @@ impl SessionProvider for CodexProvider {
                 if line_type == "session_meta" {
                     if let Some(payload) = val.get("payload") {
                         session_id = payload.get("id").and_then(|v| v.as_str()).map(String::from);
-                        cwd = payload.get("cwd").and_then(|v| v.as_str()).map(String::from);
+                        cwd = payload
+                            .get("cwd")
+                            .and_then(|v| v.as_str())
+                            .map(String::from);
                         git_branch = payload
                             .get("git")
                             .and_then(|g| g.get("branch"))
@@ -148,8 +155,7 @@ impl SessionProvider for CodexProvider {
                         let role = payload.get("role").and_then(|v| v.as_str()).unwrap_or("");
                         if role == "developer" || role == "user" {
                             if let Some(content) = payload.get("content") {
-                                first_user_msg =
-                                    Self::extract_content_text(content, "input_text");
+                                first_user_msg = Self::extract_content_text(content, "input_text");
                             }
                         }
                     }

@@ -14,7 +14,7 @@ pub fn render(f: &mut Frame, app: &App) {
 
     let chunks = Layout::vertical([
         Constraint::Length(3), // search bar
-        Constraint::Min(1),   // session list
+        Constraint::Min(1),    // session list
         Constraint::Length(1), // status bar
     ])
     .split(area);
@@ -27,11 +27,7 @@ pub fn render(f: &mut Frame, app: &App) {
 fn render_search_bar(f: &mut Frame, app: &App, area: Rect) {
     let filter_label = app.agent_filter.label();
 
-    let cursor = if app.search_query.is_empty() {
-        "_"
-    } else {
-        ""
-    };
+    let cursor = if app.search_query.is_empty() { "_" } else { "" };
 
     let search_line = Line::from(vec![
         Span::styled("REPLAY", Style::default().add_modifier(Modifier::BOLD)),
@@ -129,24 +125,28 @@ fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
         format!("{}/{} sessions", count, total)
     };
 
-    let line = Line::from(vec![
+    let mut spans = vec![
         Span::styled(
             format!(" {} ", status),
             Style::default().add_modifier(Modifier::DIM),
         ),
         Span::raw(" "),
-        Span::styled(
-            "[ENTER:view]",
-            Style::default().add_modifier(Modifier::DIM),
-        ),
+        Span::styled("[ENTER:view]", Style::default().add_modifier(Modifier::DIM)),
         Span::raw(" "),
-        Span::styled(
-            "[TAB:filter]",
-            Style::default().add_modifier(Modifier::DIM),
-        ),
+        Span::styled("[TAB:filter]", Style::default().add_modifier(Modifier::DIM)),
         Span::raw(" "),
         Span::styled("[Q:quit]", Style::default().add_modifier(Modifier::DIM)),
-    ]);
+    ];
+
+    if let Some(ref status) = app.picker_status {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            status.clone(),
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    let line = Line::from(spans);
 
     let bar = Paragraph::new(line);
     f.render_widget(bar, area);

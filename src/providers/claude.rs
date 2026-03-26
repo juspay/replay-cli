@@ -79,7 +79,10 @@ impl ClaudeProvider {
                         "tool_use" => {
                             let id = entry.get("id")?.as_str()?.to_string();
                             let name = entry.get("name")?.as_str()?.to_string();
-                            let input = entry.get("input").cloned().unwrap_or(Value::Object(Default::default()));
+                            let input = entry
+                                .get("input")
+                                .cloned()
+                                .unwrap_or(Value::Object(Default::default()));
                             Some(ContentBlock::ToolUse { id, name, input })
                         }
                         "tool_result" => {
@@ -89,7 +92,10 @@ impl ClaudeProvider {
                                 Some(other) => other.to_string(),
                                 None => String::new(),
                             };
-                            Some(ContentBlock::ToolResult { tool_use_id, content })
+                            Some(ContentBlock::ToolResult {
+                                tool_use_id,
+                                content,
+                            })
                         }
                         _ => None,
                     }
@@ -105,13 +111,21 @@ impl ClaudeProvider {
         Some(TokenUsage {
             input_tokens: usage.get("input_tokens")?.as_u64()?,
             output_tokens: usage.get("output_tokens")?.as_u64()?,
-            cache_creation_input_tokens: usage.get("cache_creation_input_tokens").and_then(|v| v.as_u64()),
-            cache_read_input_tokens: usage.get("cache_read_input_tokens").and_then(|v| v.as_u64()),
+            cache_creation_input_tokens: usage
+                .get("cache_creation_input_tokens")
+                .and_then(|v| v.as_u64()),
+            cache_read_input_tokens: usage
+                .get("cache_read_input_tokens")
+                .and_then(|v| v.as_u64()),
         })
     }
 }
 
 impl SessionProvider for ClaudeProvider {
+    fn agent(&self) -> Agent {
+        Agent::Claude
+    }
+
     fn discover(&self) -> Result<Vec<Session>> {
         let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home dir"))?;
         let projects_dir = home.join(".claude").join("projects");
@@ -171,8 +185,10 @@ impl SessionProvider for ClaudeProvider {
                 match line_type {
                     "user" => {
                         if session_id.is_none() {
-                            session_id =
-                                val.get("sessionId").and_then(|v| v.as_str()).map(String::from);
+                            session_id = val
+                                .get("sessionId")
+                                .and_then(|v| v.as_str())
+                                .map(String::from);
                         }
                         if cwd.is_none() {
                             cwd = val.get("cwd").and_then(|v| v.as_str()).map(String::from);
@@ -190,8 +206,7 @@ impl SessionProvider for ClaudeProvider {
                                 .map(String::from);
                         }
                         if first_user_msg.is_none() {
-                            if let Some(content) =
-                                val.get("message").and_then(|m| m.get("content"))
+                            if let Some(content) = val.get("message").and_then(|m| m.get("content"))
                             {
                                 first_user_msg = Self::extract_user_text(content);
                             }

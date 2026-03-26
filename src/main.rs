@@ -13,7 +13,7 @@ use cli::{Cli, Command};
 use models::LoadedSession;
 use providers::claude::ClaudeProvider;
 use providers::codex::CodexProvider;
-use providers::{discover_all, SessionProvider};
+use providers::{discover_all, load_session_messages, SessionProvider};
 use tui::app::App;
 use upload::Uploader;
 
@@ -33,10 +33,7 @@ fn main() -> Result<()> {
 }
 
 fn make_providers() -> Vec<Box<dyn SessionProvider>> {
-    vec![
-        Box::new(ClaudeProvider),
-        Box::new(CodexProvider),
-    ]
+    vec![Box::new(ClaudeProvider), Box::new(CodexProvider)]
 }
 
 fn run_browse() -> Result<()> {
@@ -67,19 +64,11 @@ fn run_upload(session_id: &str) -> Result<()> {
         .find(|s| s.id == session_id)
         .ok_or_else(|| anyhow::anyhow!("Session '{}' not found", session_id))?;
 
-    for p in &providers {
-        if let Ok(messages) = p.load_messages(session) {
-            let loaded = LoadedSession {
-                session: session.clone(),
-                messages,
-            };
-            uploader.upload(&loaded)?;
-            return Ok(());
-        }
-    }
-
-    Err(anyhow::anyhow!(
-        "Could not load messages for session '{}'",
-        session_id
-    ))
+    let messages = load_session_messages(&providers, session)?;
+    let loaded = LoadedSession {
+        session: session.clone(),
+        messages,
+    };
+    uploader.upload(&loaded)?;
+    Ok(())
 }
