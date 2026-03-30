@@ -6,7 +6,7 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
 use super::SessionProvider;
-use crate::models::{Agent, ContentBlock, Message, Role, Session, TokenUsage};
+use crate::models::{Agent, ContentBlock, ImageSource, Message, Role, Session, TokenUsage};
 
 pub struct ClaudeProvider;
 
@@ -87,14 +87,38 @@ impl ClaudeProvider {
                         }
                         "tool_result" => {
                             let tool_use_id = entry.get("tool_use_id")?.as_str()?.to_string();
-                            let content = match entry.get("content") {
-                                Some(Value::String(s)) => s.clone(),
-                                Some(other) => other.to_string(),
-                                None => String::new(),
-                            };
+                            let content = entry
+                                .get("content")
+                                .cloned()
+                                .unwrap_or(Value::String(String::new()));
+                            let is_error = entry
+                                .get("is_error")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
                             Some(ContentBlock::ToolResult {
                                 tool_use_id,
                                 content,
+                                is_error,
+                            })
+                        }
+                        "image" => {
+                            let source = entry.get("source")?;
+                            let source_type = source
+                                .get("type")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("base64")
+                                .to_string();
+                            let media_type = source
+                                .get("media_type")
+                                .and_then(|v| v.as_str())?
+                                .to_string();
+                            let data = source.get("data").and_then(|v| v.as_str())?.to_string();
+                            Some(ContentBlock::Image {
+                                source: ImageSource {
+                                    source_type,
+                                    media_type,
+                                    data,
+                                },
                             })
                         }
                         _ => None,
@@ -153,6 +177,7 @@ impl SessionProvider for ClaudeProvider {
             let mut cli_version: Option<String> = None;
             let mut model: Option<String> = None;
             let mut title: Option<String> = None;
+            let mut summary: Option<String> = None;
 
             for line in reader.lines() {
                 let line = match line {
@@ -183,6 +208,14 @@ impl SessionProvider for ClaudeProvider {
                 };
 
                 match line_type {
+                    "summary" => {
+                        if summary.is_none() {
+                            summary = val
+                                .get("summary")
+                                .and_then(|v| v.as_str())
+                                .map(String::from);
+                        }
+                    }
                     "user" => {
                         if session_id.is_none() {
                             session_id = val
@@ -205,10 +238,22 @@ impl SessionProvider for ClaudeProvider {
                                 .and_then(|v| v.as_str())
                                 .map(String::from);
                         }
+                        // Skip meta messages and messages starting with '<' for summary
                         if first_user_msg.is_none() {
-                            if let Some(content) = val.get("message").and_then(|m| m.get("content"))
-                            {
-                                first_user_msg = Self::extract_user_text(content);
+                            let is_meta = val
+                                .get("isMeta")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
+                            if !is_meta {
+                                if let Some(content) =
+                                    val.get("message").and_then(|m| m.get("content"))
+                                {
+                                    if let Some(text) = Self::extract_user_text(content) {
+                                        if !text.starts_with('<') {
+                                            first_user_msg = Some(text);
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -249,13 +294,16 @@ impl SessionProvider for ClaudeProvider {
 
             let timestamp = earliest_ts.unwrap_or_else(Utc::now);
 
+            // Prefer summary over first user message for preview
+            let preview = summary.or(first_user_msg);
+
             sessions.push(Session {
                 id,
                 agent: Agent::Claude,
                 timestamp,
                 project_path: cwd,
                 git_branch,
-                first_user_message: first_user_msg,
+                first_user_message: preview,
                 source_path: path,
                 title,
                 cli_version,

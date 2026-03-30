@@ -50,8 +50,27 @@ pub enum ContentBlock {
     #[serde(rename = "tool_result")]
     ToolResult {
         tool_use_id: String,
-        content: String,
+        /// Preserved as-is from the API: can be a JSON string or an array of
+        /// sub-blocks (text, image, etc.).
+        content: serde_json::Value,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        is_error: bool,
     },
+    #[serde(rename = "image")]
+    Image {
+        source: ImageSource,
+    },
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ImageSource {
+    /// e.g. "base64"
+    #[serde(rename = "type")]
+    pub source_type: String,
+    /// e.g. "image/png"
+    pub media_type: String,
+    /// The base64-encoded image data.
+    pub data: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
