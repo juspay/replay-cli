@@ -61,6 +61,7 @@ pub fn whoami() -> Result<()> {
     let resp = client
         .get(format!("{}/api/auth/get-session", creds.server_url))
         .header("Authorization", format!("Bearer {}", creds.token))
+        .header("X-Client-Version", env!("CARGO_PKG_VERSION"))
         .send()?;
 
     if !resp.status().is_success() {

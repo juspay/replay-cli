@@ -86,6 +86,7 @@ impl HttpUploader {
             .post(format!("{}/api/threads", self.server_url))
             .header("Authorization", format!("Bearer {}", self.token))
             .header("X-Replay-Client", "cli")
+            .header("X-Client-Version", env!("CARGO_PKG_VERSION"))
             .json(&payload)
             .send()?;
 
@@ -108,6 +109,7 @@ impl HttpUploader {
                     .put(format!("{}/api/threads/{}", self.server_url, slug))
                     .header("Authorization", format!("Bearer {}", self.token))
                     .header("X-Replay-Client", "cli")
+                    .header("X-Client-Version", env!("CARGO_PKG_VERSION"))
                     .json(&payload)
                     .send()?;
                 if put_resp.status().is_success() {
@@ -122,6 +124,13 @@ impl HttpUploader {
                     let error = err_body["error"].as_str().unwrap_or("Update failed");
                     Err(anyhow!("Re-upload failed (HTTP {status}): {error}"))
                 }
+            }
+            426 => {
+                let body: serde_json::Value = resp.json().unwrap_or_default();
+                let message = body["message"]
+                    .as_str()
+                    .unwrap_or("Your CLI is outdated. Please update to continue.");
+                Err(anyhow!("{message}"))
             }
             401 => Err(anyhow!("Not authenticated. Run `replay login` first.")),
             403 => Err(anyhow!("Upload rejected by server.")),
