@@ -49,7 +49,7 @@ jobs:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             use_cross: true
-          - target: aarch64-unknown-linux-gnu
+          - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
             use_cross: true
           - target: x86_64-apple-darwin
