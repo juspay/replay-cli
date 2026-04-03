@@ -3,26 +3,28 @@ mod auth;
 mod cli;
 mod models;
 mod providers;
-mod tui;
 mod upload;
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 
 use cli::{Cli, Command};
 use models::LoadedSession;
 use providers::claude::ClaudeProvider;
 use providers::codex::CodexProvider;
 use providers::{discover_all, load_session_messages, SessionProvider};
-use tui::app::App;
 use upload::Uploader;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        None | Some(Command::Browse) => run_browse(),
+        None => run_list(),
         Some(Command::Upload { session_id }) => run_upload(&session_id),
+        Some(Command::Completions { shell }) => {
+            clap_complete::generate(shell, &mut Cli::command(), "replay", &mut std::io::stdout());
+            Ok(())
+        }
         #[cfg(feature = "auth")]
         Some(Command::Login) => auth::login(),
         #[cfg(feature = "auth")]
@@ -36,18 +38,44 @@ fn make_providers() -> Vec<Box<dyn SessionProvider>> {
     vec![Box::new(ClaudeProvider), Box::new(CodexProvider)]
 }
 
-fn run_browse() -> Result<()> {
+fn run_list() -> Result<()> {
     let providers = make_providers();
     let sessions = discover_all(&providers);
 
     if sessions.is_empty() {
-        eprintln!("No sessions found.");
+        println!("No sessions found.");
         return Ok(());
     }
 
-    let uploader = Box::new(upload::LazyUploader);
-    let app = App::new(sessions, providers, uploader);
-    tui::run_tui(app)
+    println!("Found {} session(s):\n", sessions.len());
+    for (i, session) in sessions.iter().enumerate() {
+        let title = session
+            .title
+            .as_deref()
+            .or(session.first_user_message.as_deref())
+            .unwrap_or("(untitled)");
+        let title = truncate(title, 80);
+        let agent = format!("{:?}", session.agent);
+        let date = session.timestamp.format("%Y-%m-%d %H:%M");
+        println!("  {}. [{}] {} ({})", i + 1, agent, title, date);
+    }
+    println!("\nUse `replay upload <session_id>` to upload a session.");
+
+    Ok(())
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    // Collapse newlines/whitespace into single spaces for terminal display
+    let collapsed: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.len() <= max {
+        collapsed
+    } else {
+        let mut end = max;
+        while !collapsed.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}…", &collapsed[..end])
+    }
 }
 
 fn run_upload(session_id: &str) -> Result<()> {

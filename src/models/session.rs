@@ -8,15 +8,6 @@ pub enum Agent {
     Codex,
 }
 
-impl Agent {
-    pub fn label(&self) -> &'static str {
-        match self {
-            Agent::Claude => "[CLAUDE]",
-            Agent::Codex => "[CODEX]",
-        }
-    }
-}
-
 impl std::fmt::Display for Agent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -96,22 +87,6 @@ pub struct Message {
     pub usage: Option<TokenUsage>,
 }
 
-impl Message {
-    /// Extract display-friendly text from content blocks.
-    /// Concatenates all Text blocks, ignoring thinking/tool_use/tool_result.
-    pub fn display_text(&self) -> String {
-        let texts: Vec<&str> = self
-            .content
-            .iter()
-            .filter_map(|block| match block {
-                ContentBlock::Text { text } => Some(text.as_str()),
-                _ => None,
-            })
-            .collect();
-        texts.join("\n")
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Session {
     pub id: String,
@@ -135,22 +110,3 @@ pub struct LoadedSession {
     pub messages: Vec<Message>,
 }
 
-/// Format a timestamp as a human-readable relative time.
-pub fn relative_time(ts: &DateTime<Utc>) -> String {
-    let now = Utc::now();
-    let delta = now.signed_duration_since(*ts);
-
-    if delta.num_minutes() < 1 {
-        "just now".to_string()
-    } else if delta.num_minutes() < 60 {
-        format!("{}m ago", delta.num_minutes())
-    } else if delta.num_hours() < 24 {
-        format!("{}h ago", delta.num_hours())
-    } else if delta.num_days() < 7 {
-        format!("{}d ago", delta.num_days())
-    } else if delta.num_weeks() < 5 {
-        format!("{}w ago", delta.num_weeks())
-    } else {
-        ts.format("%Y-%m-%d").to_string()
-    }
-}

@@ -28,12 +28,10 @@ auth = ["dep:tiny_http", "dep:reqwest", "dep:open", "dep:rand"]
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
-crossterm = "0.28"
+clap_complete = "4"
 dirs = "6"
-nucleo-matcher = "0.3"
 open = { version = "5", optional = true }
 rand = { version = "0.9", optional = true }
-ratatui = "0.30"
 reqwest = { version = "0.12", features = ["blocking", "json", "rustls-tls"], default-features = false, optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

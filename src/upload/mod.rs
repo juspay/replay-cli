@@ -165,20 +165,6 @@ impl Uploader for HttpUploader {
     }
 }
 
-/// Uploader that resolves credentials lazily at upload time.
-/// This allows the TUI to start without requiring auth upfront.
-pub struct LazyUploader;
-
-impl Uploader for LazyUploader {
-    fn upload(&self, session: &LoadedSession) -> Result<()> {
-        let token = crate::auth::get_token()?
-            .ok_or_else(|| anyhow!("Not logged in. Run `replay login` first."))?;
-        let server_url = crate::auth::config::server_url();
-        let uploader = HttpUploader { server_url, token };
-        uploader.do_upload(session)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;

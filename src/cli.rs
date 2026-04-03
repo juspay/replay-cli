@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 
 #[derive(Parser)]
 #[command(name = "replay", about = "Browse and upload coding agent sessions")]
@@ -9,12 +10,16 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Browse sessions in TUI
-    Browse,
     /// Upload a session by ID
     Upload {
         /// Session ID or title to upload
         session_id: String,
+    },
+
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for
+        shell: Shell,
     },
 
     #[cfg(feature = "auth")]
