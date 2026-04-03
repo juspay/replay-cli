@@ -61,7 +61,7 @@ fn run_upload(session_id: &str) -> Result<()> {
 
     let session = sessions
         .iter()
-        .find(|s| s.id == session_id)
+        .find(|s| s.id == session_id || s.title.as_deref() == Some(session_id))
         .ok_or_else(|| anyhow::anyhow!("Session '{}' not found", session_id))?;
 
     let messages = load_session_messages(&providers, session)?;

@@ -13,7 +13,7 @@ pub enum Command {
     Browse,
     /// Upload a session by ID
     Upload {
-        /// Session ID to upload
+        /// Session ID or title to upload
         session_id: String,
     },
 
