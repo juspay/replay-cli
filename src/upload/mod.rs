@@ -45,7 +45,7 @@ struct MessagePayload {
 }
 
 pub struct HttpUploader {
-    pub server_url: String,
+    pub server_url: &'static str,
     pub token: String,
 }
 

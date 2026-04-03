@@ -35,7 +35,7 @@ pub fn login() -> Result<()> {
 
     credentials::save(&credentials::Credentials {
         token,
-        server_url,
+        server_url: server_url.to_string(),
     })?;
 
     eprintln!("Logged in successfully.");

@@ -72,6 +72,8 @@ jobs:
             | tar xz -C /usr/local/bin
 
       - name: Build
+        env:
+          REPLAY_SERVER_URL: https://replay.md
         run: ${{ matrix.use_cross && 'cross' || 'cargo' }} build --release --target ${{ matrix.target }}
 
       - name: Package (unix)
