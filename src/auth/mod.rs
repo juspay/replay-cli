@@ -16,9 +16,8 @@ pub fn login() -> Result<()> {
     let (port, rx) = server::start_callback_server(&state)?;
 
     let server_url = config::server_url();
-    let login_url = format!(
-        "{server_url}/login?redirect_uri=http://localhost:{port}/callback&state={state}"
-    );
+    let login_url =
+        format!("{server_url}/login?redirect_uri=http://localhost:{port}/callback&state={state}");
 
     eprintln!("Opening browser for login...");
 
@@ -33,10 +32,7 @@ pub fn login() -> Result<()> {
         .recv_timeout(Duration::from_secs(120))
         .map_err(|_| anyhow!("Login timed out. Please try again."))?;
 
-    credentials::save(&credentials::Credentials {
-        token,
-        server_url: server_url.to_string(),
-    })?;
+    credentials::save(&credentials::Credentials { token })?;
 
     eprintln!("Logged in successfully.");
     Ok(())
@@ -59,7 +55,7 @@ pub fn whoami() -> Result<()> {
 
     let client = reqwest::blocking::Client::new();
     let resp = client
-        .get(format!("{}/api/auth/get-session", creds.server_url))
+        .get(format!("{}/api/auth/get-session", config::server_url()))
         .header("Authorization", format!("Bearer {}", creds.token))
         .header("X-Client-Version", env!("CARGO_PKG_VERSION"))
         .send()?;
@@ -72,8 +68,14 @@ pub fn whoami() -> Result<()> {
     let body: serde_json::Value = resp.json()?;
 
     if let Some(user) = body.get("user") {
-        let name = user.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
-        let email = user.get("email").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let name = user
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let email = user
+            .get("email")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
         eprintln!("Logged in as {name} ({email})");
     } else {
         eprintln!("Authenticated, but could not read user info.");
@@ -104,7 +106,7 @@ pub fn get_user_info() -> Result<Option<UserInfo>> {
 
     let client = reqwest::blocking::Client::new();
     let resp = client
-        .get(format!("{}/api/auth/get-session", creds.server_url))
+        .get(format!("{}/api/auth/get-session", config::server_url()))
         .header("Authorization", format!("Bearer {}", creds.token))
         .header("X-Client-Version", env!("CARGO_PKG_VERSION"))
         .send()?;

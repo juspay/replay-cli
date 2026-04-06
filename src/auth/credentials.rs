@@ -6,7 +6,6 @@ use std::path::PathBuf;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Credentials {
     pub token: String,
-    pub server_url: String,
 }
 
 pub fn credentials_path() -> PathBuf {
@@ -21,8 +20,8 @@ pub fn load() -> Result<Option<Credentials>> {
     if !path.exists() {
         return Ok(None);
     }
-    let contents = fs::read_to_string(&path)
-        .with_context(|| format!("Failed to read {}", path.display()))?;
+    let contents =
+        fs::read_to_string(&path).with_context(|| format!("Failed to read {}", path.display()))?;
     let creds: Credentials =
         serde_json::from_str(&contents).with_context(|| "Failed to parse credentials")?;
     Ok(Some(creds))
@@ -49,8 +48,7 @@ pub fn save(creds: &Credentials) -> Result<()> {
 pub fn delete() -> Result<()> {
     let path = credentials_path();
     if path.exists() {
-        fs::remove_file(&path)
-            .with_context(|| format!("Failed to remove {}", path.display()))?;
+        fs::remove_file(&path).with_context(|| format!("Failed to remove {}", path.display()))?;
     }
     Ok(())
 }

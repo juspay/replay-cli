@@ -5,9 +5,7 @@ use tiny_http::{Response, Server};
 
 /// Start a local HTTP server on a random port to receive the auth callback.
 /// Returns the port and a receiver that will yield the session token.
-pub fn start_callback_server(
-    expected_state: &str,
-) -> Result<(u16, mpsc::Receiver<String>)> {
+pub fn start_callback_server(expected_state: &str) -> Result<(u16, mpsc::Receiver<String>)> {
     let server =
         Server::http("127.0.0.1:0").map_err(|e| anyhow!("Failed to start callback server: {e}"))?;
 
@@ -27,7 +25,9 @@ pub fn start_callback_server(
             let params = match url.split_once('?') {
                 Some((_, query)) => query,
                 None => {
-                    let _ = request.respond(Response::from_string("Missing query parameters").with_status_code(400));
+                    let _ = request.respond(
+                        Response::from_string("Missing query parameters").with_status_code(400),
+                    );
                     continue;
                 }
             };
@@ -59,16 +59,18 @@ pub fn start_callback_server(
             let token = match token {
                 Some(t) => t,
                 None => {
-                    let _ = request.respond(
-                        Response::from_string("Missing token").with_status_code(400),
-                    );
+                    let _ = request
+                        .respond(Response::from_string("Missing token").with_status_code(400));
                     continue;
                 }
             };
 
             let html = r#"<html><body style="font-family:system-ui;display:flex;justify-content:center;align-items:center;height:100vh;margin:0"><h2>Authentication successful! You can close this tab.</h2></body></html>"#;
-            let response = Response::from_string(html)
-                .with_header("Content-Type: text/html".parse::<tiny_http::Header>().unwrap());
+            let response = Response::from_string(html).with_header(
+                "Content-Type: text/html"
+                    .parse::<tiny_http::Header>()
+                    .unwrap(),
+            );
             let _ = request.respond(response);
 
             let _ = tx.send(token);

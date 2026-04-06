@@ -48,9 +48,7 @@ pub enum ContentBlock {
         is_error: bool,
     },
     #[serde(rename = "image")]
-    Image {
-        source: ImageSource,
-    },
+    Image { source: ImageSource },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -109,4 +107,3 @@ pub struct LoadedSession {
     pub session: Session,
     pub messages: Vec<Message>,
 }
-

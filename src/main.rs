@@ -399,17 +399,20 @@ fn run_upload_picker() -> Result<()> {
             upload_sessions(&all, &sessions, &providers, &uploader)?;
         }
         "s" | "select" => {
-            let labels: Vec<String> = sessions.iter().map(|s| {
-                let title = s
-                    .title
-                    .as_deref()
-                    .or(s.first_user_message.as_deref())
-                    .unwrap_or("(untitled)");
-                let title = truncate(title, 60);
-                let agent = format!("{:?}", s.agent);
-                let date = s.timestamp.format("%Y-%m-%d %H:%M");
-                format!("[{}] {} ({})", agent, title, date)
-            }).collect();
+            let labels: Vec<String> = sessions
+                .iter()
+                .map(|s| {
+                    let title = s
+                        .title
+                        .as_deref()
+                        .or(s.first_user_message.as_deref())
+                        .unwrap_or("(untitled)");
+                    let title = truncate(title, 60);
+                    let agent = format!("{:?}", s.agent);
+                    let date = s.timestamp.format("%Y-%m-%d %H:%M");
+                    format!("[{}] {} ({})", agent, title, date)
+                })
+                .collect();
 
             println!("  {DIM}space{RESET} toggle  {DIM}enter{RESET} confirm\n");
 

@@ -240,10 +240,8 @@ impl SessionProvider for ClaudeProvider {
                         }
                         // Skip meta messages and messages starting with '<' for summary
                         if first_user_msg.is_none() {
-                            let is_meta = val
-                                .get("isMeta")
-                                .and_then(|v| v.as_bool())
-                                .unwrap_or(false);
+                            let is_meta =
+                                val.get("isMeta").and_then(|v| v.as_bool()).unwrap_or(false);
                             if !is_meta {
                                 if let Some(content) =
                                     val.get("message").and_then(|m| m.get("content"))
