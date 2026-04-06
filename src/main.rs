@@ -47,7 +47,7 @@ fn main() -> Result<()> {
 
     let result = match cli.command {
         None => run_home(),
-        Some(Command::List) => run_list(),
+        Some(Command::List { all }) => run_list(all),
         Some(Command::Upload { session_id }) => match session_id {
             Some(id) => run_upload(&id),
             None => run_upload_picker(),
@@ -159,30 +159,96 @@ fn run_home() -> Result<()> {
 
 // ── replay list ────────────────────────────────────────────────────────
 
-fn run_list() -> Result<()> {
+fn run_list(show_all: bool) -> Result<()> {
     let providers = make_providers();
-    let sessions = discover_all(&providers);
+    let all_sessions = discover_all(&providers);
+
+    let cwd = std::env::current_dir()?;
+    let cwd_str = cwd.to_string_lossy();
+
+    let sessions: Vec<_> = if show_all {
+        all_sessions
+    } else {
+        all_sessions
+            .into_iter()
+            .filter(|s| {
+                s.project_path
+                    .as_deref()
+                    .map(|p| p == cwd_str.as_ref())
+                    .unwrap_or(false)
+            })
+            .collect()
+    };
 
     if sessions.is_empty() {
-        println!("No sessions found.");
+        if show_all {
+            println!("No sessions found.");
+        } else {
+            println!("No sessions found for {DIM}{cwd_str}{RESET}");
+            println!("{DIM}Use `replay list -a` to show all sessions.{RESET}");
+        }
         return Ok(());
     }
 
-    println!("Found {} session(s):\n", sessions.len());
-    for (i, session) in sessions.iter().enumerate() {
-        let title = session
-            .title
-            .as_deref()
-            .or(session.first_user_message.as_deref())
-            .unwrap_or("(untitled)");
-        let title = truncate(title, 80);
-        let agent = format!("{:?}", session.agent);
-        let date = session.timestamp.format("%Y-%m-%d %H:%M");
-        println!("  {}. [{}] {} ({})", i + 1, agent, title, date);
+    if show_all {
+        println!("  {BOLD}All sessions{RESET}\n");
+    } else {
+        println!("  {BOLD}Sessions for{RESET} {DIM}{cwd_str}{RESET}\n");
     }
-    println!("\nUse `replay upload <session_id>` to upload a session.");
+
+    let term_width = console::Term::stdout().size().1 as usize;
+
+    // Fixed columns: 2 (indent) + 36 (uuid) + 2 + 8 (agent) + 2 + 16 (date) + 2 = 68 + 5 (right padding)
+    let fixed = 73;
+    let title_width = if term_width > fixed + 10 {
+        term_width - fixed
+    } else {
+        20 // minimum
+    };
+
+    // Group by project_path when --all
+    if show_all {
+        let mut by_project: std::collections::BTreeMap<String, Vec<&models::Session>> =
+            std::collections::BTreeMap::new();
+        for s in &sessions {
+            let key = s.project_path.as_deref().unwrap_or("(unknown)").to_string();
+            by_project.entry(key).or_default().push(s);
+        }
+
+        for (project, group) in &by_project {
+            println!("\n  {CYAN}{project}{RESET}");
+            for s in group {
+                print_session_row(s, title_width);
+            }
+        }
+    } else {
+        for s in &sessions {
+            print_session_row(s, title_width);
+        }
+    }
+
+    println!(
+        "\n  {DIM}{} session(s). Upload with:{RESET} replay upload {CYAN}<id>{RESET}",
+        sessions.len()
+    );
 
     Ok(())
+}
+
+fn print_session_row(s: &models::Session, title_width: usize) {
+    let agent = format!("{:?}", s.agent);
+    let date = s.timestamp.format("%Y-%m-%d %H:%M").to_string();
+    let title = s
+        .title
+        .as_deref()
+        .or(s.first_user_message.as_deref())
+        .unwrap_or("(untitled)");
+    let title = truncate(title, title_width);
+
+    println!(
+        "  {DIM}{}{RESET}  {:<8} {DIM}{}{RESET}  {BOLD}{}{RESET}",
+        s.id, agent, date, title
+    );
 }
 
 fn truncate(s: &str, max: usize) -> String {

@@ -11,7 +11,11 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Command {
     /// List discovered sessions
-    List,
+    List {
+        /// Show all sessions globally (default: only current directory)
+        #[arg(short, long)]
+        all: bool,
+    },
 
     /// Upload session(s) — by ID, or pick interactively
     Upload {
