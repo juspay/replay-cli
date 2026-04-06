@@ -16,7 +16,7 @@ use providers::claude::ClaudeProvider;
 use providers::codex::CodexProvider;
 use providers::{discover_all, load_session_messages, SessionProvider};
 #[allow(unused_imports)]
-use upload::{UploadOutcome, Uploader};
+use upload::UploadOutcome;
 
 const BANNER: &str = r#"
 ██████╗ ███████╗██████╗ ██╗      █████╗ ██╗   ██╗
@@ -267,7 +267,7 @@ fn run_upload(session_id: &str) -> Result<()> {
     let token = auth::get_token()?
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Run `replay login` first."))?;
     let server_url = auth::config::server_url();
-    let uploader = upload::HttpUploader { server_url, token };
+    let uploader = upload::HttpUploader::new(server_url, token);
 
     let providers = make_providers();
     let sessions = discover_all(&providers);
@@ -327,50 +327,112 @@ fn upload_sessions(
     providers: &[Box<dyn SessionProvider>],
     uploader: &upload::HttpUploader,
 ) -> Result<()> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
+
     let total = indices.len();
-    let mut success = 0;
-    let mut failed = 0;
-    let mut urls: Vec<String> = Vec::new();
 
-    for (n, &idx) in indices.iter().enumerate() {
-        let session = &sessions[idx];
-        let title = session
-            .title
-            .as_deref()
-            .or(session.first_user_message.as_deref())
-            .unwrap_or("(untitled)");
-        let title = truncate(title, 50);
+    // Phase 1: load all sessions (fast local I/O, sequential)
+    let jobs: Vec<_> = indices
+        .iter()
+        .enumerate()
+        .map(|(n, &idx)| {
+            let session = &sessions[idx];
+            let title = session
+                .title
+                .as_deref()
+                .or(session.first_user_message.as_deref())
+                .unwrap_or("(untitled)");
+            let title = truncate(title, 50).to_string();
+            let loaded = load_session_messages(providers, session).map(|messages| LoadedSession {
+                session: session.clone(),
+                messages,
+            });
+            (n + 1, title, loaded)
+        })
+        .collect();
 
-        eprint!("  {DIM}[{}/{}]{RESET} {title} … ", n + 1, total);
+    // Phase 2: upload in parallel, print in order (reorder buffer)
+    let next = AtomicUsize::new(0);
+    let success = AtomicUsize::new(0);
+    let failed = AtomicUsize::new(0);
 
-        match load_session_messages(providers, session) {
-            Ok(messages) => {
-                let loaded = LoadedSession {
-                    session: session.clone(),
-                    messages,
-                };
-                match uploader.upload(&loaded) {
-                    Ok(outcome) => {
-                        let (label, url) = match outcome {
-                            UploadOutcome::Created { url } => ("uploaded", url),
-                            UploadOutcome::Updated { url } => ("updated", url),
-                        };
-                        eprintln!("{GREEN}{label}{RESET}");
-                        urls.push(url);
-                        success += 1;
-                    }
-                    Err(e) => {
-                        eprintln!("{RED}failed{RESET} {DIM}— {e}{RESET}");
-                        failed += 1;
-                    }
+    // Each slot holds the formatted line once its worker finishes
+    let results: Vec<Mutex<Option<(String, Option<String>)>>> =
+        (0..jobs.len()).map(|_| Mutex::new(None)).collect();
+    // Drain cursor: index of the next line to print
+    let drain = AtomicUsize::new(0);
+    let out = Mutex::new(std::io::stderr());
+
+    std::thread::scope(|s| {
+        let workers = upload::UPLOAD_CONCURRENCY.min(jobs.len());
+        for _ in 0..workers {
+            s.spawn(|| loop {
+                let i = next.fetch_add(1, Ordering::Relaxed);
+                if i >= jobs.len() {
+                    break;
                 }
-            }
-            Err(e) => {
-                eprintln!("{RED}failed{RESET} {DIM}— {e}{RESET}");
-                failed += 1;
-            }
+                let (num, ref title, ref loaded) = jobs[i];
+
+                let (line, url) = match loaded {
+                    Err(e) => {
+                        failed.fetch_add(1, Ordering::Relaxed);
+                        (
+                            format!("  {DIM}[{num}/{total}]{RESET} {title} … {RED}failed{RESET} {DIM}— {e}{RESET}"),
+                            None,
+                        )
+                    }
+                    Ok(loaded) => match uploader.upload(loaded) {
+                        Ok(outcome) => {
+                            let (label, url) = match outcome {
+                                UploadOutcome::Created { url } => ("uploaded", url),
+                                UploadOutcome::Updated { url } => ("updated", url),
+                            };
+                            success.fetch_add(1, Ordering::Relaxed);
+                            (
+                                format!("  {DIM}[{num}/{total}]{RESET} {title} … {GREEN}{label}{RESET}"),
+                                Some(url),
+                            )
+                        }
+                        Err(e) => {
+                            failed.fetch_add(1, Ordering::Relaxed);
+                            (
+                                format!("  {DIM}[{num}/{total}]{RESET} {title} … {RED}failed{RESET} {DIM}— {e}{RESET}"),
+                                None,
+                            )
+                        }
+                    },
+                };
+
+                // Store result in our slot
+                *results[i].lock().unwrap() = Some((line, url));
+
+                // Drain: print all consecutive completed lines from the front
+                let mut out = out.lock().unwrap();
+                loop {
+                    let d = drain.load(Ordering::Acquire);
+                    if d >= jobs.len() {
+                        break;
+                    }
+                    let slot = results[d].lock().unwrap();
+                    if slot.is_none() {
+                        break;
+                    }
+                    let (ref line, _) = *slot.as_ref().unwrap();
+                    writeln!(out, "{line}").ok();
+                    drop(slot);
+                    drain.fetch_add(1, Ordering::Release);
+                }
+            });
         }
-    }
+    });
+
+    let success = success.load(Ordering::Relaxed);
+    let failed = failed.load(Ordering::Relaxed);
+    let urls: Vec<String> = results
+        .into_iter()
+        .filter_map(|m| m.into_inner().unwrap().and_then(|(_, url)| url))
+        .collect();
 
     eprintln!();
     if failed == 0 {
@@ -397,7 +459,7 @@ fn run_upload_picker(global: bool) -> Result<()> {
     let token = auth::get_token()?
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Run `replay login` first."))?;
     let server_url = auth::config::server_url();
-    let uploader = upload::HttpUploader { server_url, token };
+    let uploader = upload::HttpUploader::new(server_url, token);
 
     let cwd = std::env::current_dir()?;
     let cwd_str = cwd.to_string_lossy();

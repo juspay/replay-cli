@@ -9,13 +9,11 @@ use std::io::Write;
 
 use crate::models::{ContentBlock, LoadedSession, Role, TokenUsage};
 
+pub const UPLOAD_CONCURRENCY: usize = 5;
+
 pub enum UploadOutcome {
     Created { url: String },
     Updated { url: String },
-}
-
-pub trait Uploader {
-    fn upload(&self, session: &LoadedSession) -> Result<UploadOutcome>;
 }
 
 #[derive(Serialize)]
@@ -57,6 +55,17 @@ struct MessagePayload {
 pub struct HttpUploader {
     pub server_url: &'static str,
     pub token: String,
+    client: reqwest::blocking::Client,
+}
+
+impl HttpUploader {
+    pub fn new(server_url: &'static str, token: String) -> Self {
+        Self {
+            server_url,
+            token,
+            client: reqwest::blocking::Client::new(),
+        }
+    }
 }
 
 fn gzip_json(payload: &impl Serialize) -> Result<Vec<u8>> {
@@ -122,14 +131,14 @@ impl HttpUploader {
             .send()?)
     }
 
-    fn do_upload(&self, loaded: &LoadedSession) -> Result<UploadOutcome> {
+    pub fn upload(&self, loaded: &LoadedSession) -> Result<UploadOutcome> {
         ensure_uploadable(loaded)?;
 
         let payload = self.build_payload(loaded);
-        let client = reqwest::blocking::Client::new();
 
         let resp = self.send_gzipped(
-            client.post(format!("{}/api/threads", self.server_url)),
+            self.client
+                .post(format!("{}/api/threads", self.server_url)),
             &payload,
         )?;
 
@@ -145,7 +154,8 @@ impl HttpUploader {
                     .as_str()
                     .ok_or_else(|| anyhow!("Server returned 409 without slug"))?;
                 let put_resp = self.send_gzipped(
-                    client.put(format!("{}/api/threads/{}", self.server_url, slug)),
+                    self.client
+                        .put(format!("{}/api/threads/{}", self.server_url, slug)),
                     &payload,
                 )?;
                 if put_resp.status().is_success() {
@@ -197,12 +207,6 @@ fn ensure_uploadable(loaded: &LoadedSession) -> Result<()> {
     }
 
     Ok(())
-}
-
-impl Uploader for HttpUploader {
-    fn upload(&self, session: &LoadedSession) -> Result<UploadOutcome> {
-        self.do_upload(session)
-    }
 }
 
 #[cfg(test)]
