@@ -27,7 +27,7 @@ impl ClaudeProvider {
                     continue;
                 }
                 Self::collect_jsonl_files(&path, out);
-            } else if path.extension().map_or(false, |e| e == "jsonl") {
+            } else if path.extension().is_some_and(|e| e == "jsonl") {
                 out.push(path);
             }
         }
