@@ -10,11 +10,15 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Upload a session by ID
-    Upload {
-        /// Session ID or title to upload
-        session_id: String,
-    },
+    /// List discovered sessions
+    List,
+
+    // TODO: re-enable with picker UI
+    // /// Upload session(s) — by ID, or all sessions for the current directory
+    // Upload {
+    //     /// Session ID or title to upload (omit to upload all sessions for cwd)
+    //     session_id: Option<String>,
+    // },
 
     /// Generate shell completions
     Completions {

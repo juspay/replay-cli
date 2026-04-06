@@ -87,3 +87,46 @@ pub fn whoami() -> Result<()> {
 pub fn get_token() -> Result<Option<String>> {
     Ok(credentials::load()?.map(|c| c.token))
 }
+
+/// User info returned by the server.
+pub struct UserInfo {
+    pub name: String,
+    pub email: String,
+}
+
+/// Check if the user is logged in and fetch their info.
+/// Returns Ok(None) if not logged in or session is invalid.
+pub fn get_user_info() -> Result<Option<UserInfo>> {
+    let creds = match credentials::load()? {
+        Some(c) => c,
+        None => return Ok(None),
+    };
+
+    let client = reqwest::blocking::Client::new();
+    let resp = client
+        .get(format!("{}/api/auth/get-session", creds.server_url))
+        .header("Authorization", format!("Bearer {}", creds.token))
+        .header("X-Client-Version", env!("CARGO_PKG_VERSION"))
+        .send()?;
+
+    if !resp.status().is_success() {
+        return Ok(None);
+    }
+
+    let body: serde_json::Value = resp.json()?;
+    if let Some(user) = body.get("user") {
+        let name = user
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+        let email = user
+            .get("email")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+        Ok(Some(UserInfo { name, email }))
+    } else {
+        Ok(None)
+    }
+}
