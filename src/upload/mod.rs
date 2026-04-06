@@ -137,8 +137,7 @@ impl HttpUploader {
         let payload = self.build_payload(loaded);
 
         let resp = self.send_gzipped(
-            self.client
-                .post(format!("{}/api/threads", self.server_url)),
+            self.client.post(format!("{}/api/threads", self.server_url)),
             &payload,
         )?;
 

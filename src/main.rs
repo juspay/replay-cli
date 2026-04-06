@@ -358,8 +358,8 @@ fn upload_sessions(
     let failed = AtomicUsize::new(0);
 
     // Each slot holds the formatted line once its worker finishes
-    let results: Vec<Mutex<Option<(String, Option<String>)>>> =
-        (0..jobs.len()).map(|_| Mutex::new(None)).collect();
+    type Slot = Option<(String, Option<String>)>;
+    let results: Vec<Mutex<Slot>> = (0..jobs.len()).map(|_| Mutex::new(None)).collect();
     // Drain cursor: index of the next line to print
     let drain = AtomicUsize::new(0);
     let out = Mutex::new(std::io::stderr());
