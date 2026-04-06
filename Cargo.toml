@@ -29,6 +29,8 @@ anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
+ctrlc = "3.5.2"
+dialoguer = "0.12.0"
 dirs = "6"
 open = { version = "5", optional = true }
 rand = { version = "0.9", optional = true }

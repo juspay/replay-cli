@@ -13,12 +13,11 @@ pub enum Command {
     /// List discovered sessions
     List,
 
-    // TODO: re-enable with picker UI
-    // /// Upload session(s) — by ID, or all sessions for the current directory
-    // Upload {
-    //     /// Session ID or title to upload (omit to upload all sessions for cwd)
-    //     session_id: Option<String>,
-    // },
+    /// Upload session(s) — by ID, or pick interactively
+    Upload {
+        /// Session ID or title to upload (omit for interactive picker)
+        session_id: Option<String>,
+    },
 
     /// Generate shell completions
     Completions {

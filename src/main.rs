@@ -26,17 +26,32 @@ const BANNER: &str = r#"
 ██║  ██║███████╗██║     ███████╗██║  ██║   ██║
 ╚═╝  ╚═╝╚══════╝╚═╝     ╚══════╝╚═╝  ╚═╝   ╚═╝   "#;
 
+fn reset_terminal() {
+    // Show cursor, disable raw mode, reset attributes
+    eprint!("\x1b[?25h\x1b[0m");
+    // Best-effort: disable raw mode via stty
+    let _ = std::process::Command::new("stty")
+        .arg("sane")
+        .stdin(std::process::Stdio::inherit())
+        .status();
+}
+
 fn main() -> Result<()> {
+    ctrlc::set_handler(move || {
+        reset_terminal();
+        std::process::exit(130);
+    })
+    .expect("failed to set Ctrl-C handler");
+
     let cli = Cli::parse();
 
-    match cli.command {
+    let result = match cli.command {
         None => run_home(),
         Some(Command::List) => run_list(),
-        // TODO: re-enable with picker UI
-        // Some(Command::Upload { session_id }) => match session_id {
-        //     Some(id) => run_upload(&id),
-        //     None => run_upload_cwd(),
-        // },
+        Some(Command::Upload { session_id }) => match session_id {
+            Some(id) => run_upload(&id),
+            None => run_upload_picker(),
+        },
         Some(Command::Completions { shell }) => {
             clap_complete::generate(shell, &mut Cli::command(), "replay", &mut std::io::stdout());
             Ok(())
@@ -47,7 +62,10 @@ fn main() -> Result<()> {
         Some(Command::Logout) => auth::logout(),
         #[cfg(feature = "auth")]
         Some(Command::Whoami) => auth::whoami(),
-    }
+    };
+
+    reset_terminal();
+    result
 }
 
 fn make_providers() -> Vec<Box<dyn SessionProvider>> {
@@ -205,9 +223,66 @@ fn run_upload(session_id: &str) -> Result<()> {
     Ok(())
 }
 
-// ── replay upload (all sessions for cwd) ───────────────────────────────
+// ── replay upload (interactive) ─────────────────────────────────────────
 
-fn run_upload_cwd() -> Result<()> {
+fn upload_sessions(
+    indices: &[usize],
+    sessions: &[models::Session],
+    providers: &[Box<dyn SessionProvider>],
+    uploader: &upload::HttpUploader,
+) -> Result<()> {
+    let total = indices.len();
+    let mut success = 0;
+    let mut failed = 0;
+
+    for (n, &idx) in indices.iter().enumerate() {
+        let session = &sessions[idx];
+        let title = session
+            .title
+            .as_deref()
+            .or(session.first_user_message.as_deref())
+            .unwrap_or("(untitled)");
+        let title = truncate(title, 50);
+
+        eprint!("  {DIM}[{}/{}]{RESET} {title} … ", n + 1, total);
+
+        match load_session_messages(providers, session) {
+            Ok(messages) => {
+                let loaded = LoadedSession {
+                    session: session.clone(),
+                    messages,
+                };
+                match uploader.upload(&loaded) {
+                    Ok(()) => {
+                        eprintln!("{GREEN}ok{RESET}");
+                        success += 1;
+                    }
+                    Err(e) => {
+                        eprintln!("{RED}failed{RESET} — {e}");
+                        failed += 1;
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("{RED}failed{RESET} — {e}");
+                failed += 1;
+            }
+        }
+    }
+
+    println!();
+    if failed == 0 {
+        println!("  {GREEN}All {success} session(s) uploaded.{RESET}");
+    } else {
+        println!("  {success} uploaded, {RED}{failed} failed{RESET}.");
+    }
+
+    Ok(())
+}
+
+fn run_upload_picker() -> Result<()> {
+    use dialoguer::MultiSelect;
+
     let token = auth::get_token()?
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Run `replay login` first."))?;
     let server_url = auth::config::server_url();
@@ -219,9 +294,8 @@ fn run_upload_cwd() -> Result<()> {
     let providers = make_providers();
     let all_sessions = discover_all(&providers);
 
-    // Filter to sessions whose project_path matches the current directory
     let sessions: Vec<_> = all_sessions
-        .iter()
+        .into_iter()
         .filter(|s| {
             s.project_path
                 .as_deref()
@@ -231,80 +305,68 @@ fn run_upload_cwd() -> Result<()> {
         .collect();
 
     if sessions.is_empty() {
-        println!("No sessions found for {}", cwd_str);
+        println!("No sessions found for {DIM}{cwd_str}{RESET}");
         return Ok(());
     }
 
+    // Prompt for action
     println!(
-        "Found {} session(s) for {}:\n",
+        "  Found {BOLD}{}{RESET} session(s) for {DIM}{}{RESET}\n",
         sessions.len(),
         cwd_str
     );
-    for (i, session) in sessions.iter().enumerate() {
-        let title = session
-            .title
-            .as_deref()
-            .or(session.first_user_message.as_deref())
-            .unwrap_or("(untitled)");
-        let title = truncate(title, 70);
-        let agent = format!("{:?}", session.agent);
-        let date = session.timestamp.format("%Y-%m-%d %H:%M");
-        println!("  {}. [{}] {} ({})", i + 1, agent, title, date);
-    }
-
-    println!();
-    print!("Upload all {} session(s)? [Y/n] ", sessions.len());
+    print!(
+        "  Upload {BOLD}[a]{RESET}ll {DIM}({}){RESET} / {BOLD}[s]{RESET}elect / {BOLD}[q]{RESET}uit: ",
+        sessions.len()
+    );
     io::stdout().flush()?;
 
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
     let input = input.trim().to_lowercase();
 
-    if !(input.is_empty() || input == "y" || input == "yes") {
-        println!("Aborted.");
-        return Ok(());
-    }
-
     println!();
-    let mut success = 0;
-    let mut failed = 0;
 
-    for session in &sessions {
-        let title = session
-            .title
-            .as_deref()
-            .or(session.first_user_message.as_deref())
-            .unwrap_or("(untitled)");
-        let title = truncate(title, 50);
+    match input.as_str() {
+        "a" | "all" | "" => {
+            let all: Vec<usize> = (0..sessions.len()).collect();
+            upload_sessions(&all, &sessions, &providers, &uploader)?;
+        }
+        "s" | "select" => {
+            let labels: Vec<String> = sessions.iter().map(|s| {
+                let title = s
+                    .title
+                    .as_deref()
+                    .or(s.first_user_message.as_deref())
+                    .unwrap_or("(untitled)");
+                let title = truncate(title, 60);
+                let agent = format!("{:?}", s.agent);
+                let date = s.timestamp.format("%Y-%m-%d %H:%M");
+                format!("[{}] {} ({})", agent, title, date)
+            }).collect();
 
-        match load_session_messages(&providers, session) {
-            Ok(messages) => {
-                let loaded = LoadedSession {
-                    session: (*session).clone(),
-                    messages,
-                };
-                match uploader.upload(&loaded) {
-                    Ok(()) => {
-                        success += 1;
-                    }
-                    Err(e) => {
-                        eprintln!("  ✗ {} — {}", title, e);
-                        failed += 1;
-                    }
-                }
+            println!("  {DIM}space{RESET} toggle  {DIM}enter{RESET} confirm\n");
+
+            let selected = MultiSelect::new()
+                .items(&labels)
+                .defaults(&vec![true; labels.len()])
+                .interact()?;
+
+            if selected.is_empty() {
+                println!("  Nothing selected.");
+                return Ok(());
             }
-            Err(e) => {
-                eprintln!("  ✗ {} — failed to load: {}", title, e);
-                failed += 1;
-            }
+
+            println!();
+            upload_sessions(&selected, &sessions, &providers, &uploader)?;
+        }
+        "q" | "quit" | "n" | "no" => {
+            println!("  Aborted.");
+        }
+        _ => {
+            println!("  Unknown option. Use {BOLD}a{RESET}, {BOLD}s{RESET}, or {BOLD}q{RESET}.");
         }
     }
-
-    println!();
-    println!(
-        "Done. {} uploaded, {} failed.",
-        success, failed
-    );
 
     Ok(())
 }
