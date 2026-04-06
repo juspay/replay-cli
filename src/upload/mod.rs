@@ -1,6 +1,9 @@
 use anyhow::{anyhow, Result};
 use chrono::SecondsFormat;
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use serde::Serialize;
+use std::io::Write;
 
 use crate::models::{ContentBlock, LoadedSession, Role, TokenUsage};
 
@@ -49,11 +52,16 @@ pub struct HttpUploader {
     pub token: String,
 }
 
-impl HttpUploader {
-    fn do_upload(&self, loaded: &LoadedSession) -> Result<()> {
-        ensure_uploadable(loaded)?;
+fn gzip_json(payload: &impl Serialize) -> Result<Vec<u8>> {
+    let json = serde_json::to_vec(payload)?;
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(&json)?;
+    Ok(encoder.finish()?)
+}
 
-        let payload = UploadRequest {
+impl HttpUploader {
+    fn build_payload(&self, loaded: &LoadedSession) -> UploadRequest {
+        UploadRequest {
             session: SessionPayload {
                 id: loaded.session.id.clone(),
                 agent: loaded.session.agent.to_string(),
@@ -79,16 +87,35 @@ impl HttpUploader {
                     usage: m.usage.clone(),
                 })
                 .collect(),
-        };
+        }
+    }
 
-        let client = reqwest::blocking::Client::new();
-        let resp = client
-            .post(format!("{}/api/threads", self.server_url))
+    fn send_gzipped(
+        &self,
+        request: reqwest::blocking::RequestBuilder,
+        payload: &UploadRequest,
+    ) -> Result<reqwest::blocking::Response> {
+        let compressed = gzip_json(payload)?;
+        Ok(request
             .header("Authorization", format!("Bearer {}", self.token))
             .header("X-Replay-Client", "cli")
             .header("X-Client-Version", env!("CARGO_PKG_VERSION"))
-            .json(&payload)
-            .send()?;
+            .header("Content-Type", "application/json")
+            .header("Content-Encoding", "gzip")
+            .body(compressed)
+            .send()?)
+    }
+
+    fn do_upload(&self, loaded: &LoadedSession) -> Result<()> {
+        ensure_uploadable(loaded)?;
+
+        let payload = self.build_payload(loaded);
+        let client = reqwest::blocking::Client::new();
+
+        let resp = self.send_gzipped(
+            client.post(format!("{}/api/threads", self.server_url)),
+            &payload,
+        )?;
 
         match resp.status().as_u16() {
             201 => {
@@ -105,13 +132,10 @@ impl HttpUploader {
                     .as_str()
                     .ok_or_else(|| anyhow!("Server returned 409 without slug"))?;
                 // Re-upload: PUT the full payload to update the existing thread
-                let put_resp = client
-                    .put(format!("{}/api/threads/{}", self.server_url, slug))
-                    .header("Authorization", format!("Bearer {}", self.token))
-                    .header("X-Replay-Client", "cli")
-                    .header("X-Client-Version", env!("CARGO_PKG_VERSION"))
-                    .json(&payload)
-                    .send()?;
+                let put_resp = self.send_gzipped(
+                    client.put(format!("{}/api/threads/{}", self.server_url, slug)),
+                    &payload,
+                )?;
                 if put_resp.status().is_success() {
                     let put_body: serde_json::Value = put_resp.json()?;
                     let url = put_body["url"].as_str().unwrap_or("(unknown URL)");
@@ -125,6 +149,9 @@ impl HttpUploader {
                     Err(anyhow!("Re-upload failed (HTTP {status}): {error}"))
                 }
             }
+            413 => Err(anyhow!(
+                "Session is too large to upload (exceeds server limit even after compression)"
+            )),
             426 => {
                 let body: serde_json::Value = resp.json().unwrap_or_default();
                 let message = body["message"]
