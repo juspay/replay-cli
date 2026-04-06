@@ -21,6 +21,10 @@ pub enum Command {
     Upload {
         /// Session ID or title to upload (omit for interactive picker)
         session_id: Option<String>,
+
+        /// Consider all sessions globally (default: only current directory)
+        #[arg(short, long)]
+        global: bool,
     },
 
     /// Generate shell completions

@@ -48,9 +48,9 @@ fn main() -> Result<()> {
     let result = match cli.command {
         None => run_home(),
         Some(Command::List { all }) => run_list(all),
-        Some(Command::Upload { session_id }) => match session_id {
+        Some(Command::Upload { session_id, global }) => match session_id {
             Some(id) => run_upload(&id),
-            None => run_upload_picker(),
+            None => run_upload_picker(global),
         },
         Some(Command::Completions { shell }) => {
             clap_complete::generate(shell, &mut Cli::command(), "replay", &mut std::io::stdout());
@@ -391,7 +391,7 @@ fn upload_sessions(
     Ok(())
 }
 
-fn run_upload_picker() -> Result<()> {
+fn run_upload_picker(global: bool) -> Result<()> {
     use dialoguer::MultiSelect;
 
     let token = auth::get_token()?
@@ -405,27 +405,43 @@ fn run_upload_picker() -> Result<()> {
     let providers = make_providers();
     let all_sessions = discover_all(&providers);
 
-    let sessions: Vec<_> = all_sessions
-        .into_iter()
-        .filter(|s| {
-            s.project_path
-                .as_deref()
-                .map(|p| p == cwd_str.as_ref())
-                .unwrap_or(false)
-        })
-        .collect();
+    let sessions: Vec<_> = if global {
+        all_sessions
+    } else {
+        all_sessions
+            .into_iter()
+            .filter(|s| {
+                s.project_path
+                    .as_deref()
+                    .map(|p| p == cwd_str.as_ref())
+                    .unwrap_or(false)
+            })
+            .collect()
+    };
 
     if sessions.is_empty() {
-        println!("No sessions found for {DIM}{cwd_str}{RESET}");
+        if global {
+            println!("No sessions found.");
+        } else {
+            println!("No sessions found for {DIM}{cwd_str}{RESET}");
+            println!("{DIM}Use `replay upload -g` to consider all sessions.{RESET}");
+        }
         return Ok(());
     }
 
     // Prompt for action
-    println!(
-        "  Found {BOLD}{}{RESET} session(s) for {DIM}{}{RESET}\n",
-        sessions.len(),
-        cwd_str
-    );
+    if global {
+        println!(
+            "  Found {BOLD}{}{RESET} session(s) globally\n",
+            sessions.len(),
+        );
+    } else {
+        println!(
+            "  Found {BOLD}{}{RESET} session(s) for {DIM}{}{RESET}\n",
+            sessions.len(),
+            cwd_str
+        );
+    }
     print!(
         "  Upload {BOLD}[a]{RESET}ll {DIM}({}){RESET} / {BOLD}[s]{RESET}elect / {BOLD}[q]{RESET}uit: ",
         sessions.len()
