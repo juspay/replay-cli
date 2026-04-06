@@ -1,3 +1,5 @@
+mod images;
+
 use anyhow::{anyhow, Result};
 use chrono::SecondsFormat;
 use flate2::write::GzEncoder;
@@ -7,8 +9,13 @@ use std::io::Write;
 
 use crate::models::{ContentBlock, LoadedSession, Role, TokenUsage};
 
+pub enum UploadOutcome {
+    Created { url: String },
+    Updated { url: String },
+}
+
 pub trait Uploader {
-    fn upload(&self, session: &LoadedSession) -> Result<()>;
+    fn upload(&self, session: &LoadedSession) -> Result<UploadOutcome>;
 }
 
 #[derive(Serialize)]
@@ -81,7 +88,16 @@ impl HttpUploader {
                 .map(|m| MessagePayload {
                     role: m.role,
                     timestamp: m.timestamp.to_rfc3339_opts(SecondsFormat::Millis, true),
-                    content: m.content.clone(),
+                    content: m
+                        .content
+                        .iter()
+                        .map(|block| match block {
+                            ContentBlock::Image { source } => ContentBlock::Image {
+                                source: images::compress_image(source),
+                            },
+                            other => other.clone(),
+                        })
+                        .collect(),
                     model: m.model.clone(),
                     stop_reason: m.stop_reason.clone(),
                     usage: m.usage.clone(),
@@ -106,7 +122,7 @@ impl HttpUploader {
             .send()?)
     }
 
-    fn do_upload(&self, loaded: &LoadedSession) -> Result<()> {
+    fn do_upload(&self, loaded: &LoadedSession) -> Result<UploadOutcome> {
         ensure_uploadable(loaded)?;
 
         let payload = self.build_payload(loaded);
@@ -120,28 +136,25 @@ impl HttpUploader {
         match resp.status().as_u16() {
             201 => {
                 let body: serde_json::Value = resp.json()?;
-                let url = body["url"].as_str().unwrap_or("(unknown URL)");
-                eprintln!("Uploaded successfully!");
-                eprintln!("  {url}");
-                eprintln!("  visibility: private (change at {url})");
-                Ok(())
+                let url = body["url"].as_str().unwrap_or("(unknown URL)").to_string();
+                Ok(UploadOutcome::Created { url })
             }
             409 => {
                 let body: serde_json::Value = resp.json()?;
                 let slug = body["slug"]
                     .as_str()
                     .ok_or_else(|| anyhow!("Server returned 409 without slug"))?;
-                // Re-upload: PUT the full payload to update the existing thread
                 let put_resp = self.send_gzipped(
                     client.put(format!("{}/api/threads/{}", self.server_url, slug)),
                     &payload,
                 )?;
                 if put_resp.status().is_success() {
                     let put_body: serde_json::Value = put_resp.json()?;
-                    let url = put_body["url"].as_str().unwrap_or("(unknown URL)");
-                    eprintln!("Updated successfully!");
-                    eprintln!("  {url}");
-                    Ok(())
+                    let url = put_body["url"]
+                        .as_str()
+                        .unwrap_or("(unknown URL)")
+                        .to_string();
+                    Ok(UploadOutcome::Updated { url })
                 } else {
                     let status = put_resp.status().as_u16();
                     let err_body: serde_json::Value = put_resp.json().unwrap_or_default();
@@ -187,7 +200,7 @@ fn ensure_uploadable(loaded: &LoadedSession) -> Result<()> {
 }
 
 impl Uploader for HttpUploader {
-    fn upload(&self, session: &LoadedSession) -> Result<()> {
+    fn upload(&self, session: &LoadedSession) -> Result<UploadOutcome> {
         self.do_upload(session)
     }
 }

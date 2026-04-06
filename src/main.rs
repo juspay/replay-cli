@@ -16,7 +16,7 @@ use providers::claude::ClaudeProvider;
 use providers::codex::CodexProvider;
 use providers::{discover_all, load_session_messages, SessionProvider};
 #[allow(unused_imports)]
-use upload::Uploader;
+use upload::{UploadOutcome, Uploader};
 
 const BANNER: &str = r#"
 ██████╗ ███████╗██████╗ ██╗      █████╗ ██╗   ██╗
@@ -80,6 +80,7 @@ const BOLD: &str = "\x1b[1m";
 const DIM: &str = "\x1b[2m";
 const GREEN: &str = "\x1b[32m";
 const RED: &str = "\x1b[31m";
+const ITALIC: &str = "\x1b[3m";
 const CYAN: &str = "\x1b[36m";
 
 fn run_home() -> Result<()> {
@@ -141,18 +142,14 @@ fn run_home() -> Result<()> {
 
     println!();
 
-    // tldr-style usage
-    println!("  Show the current authenticated user:");
+    // Usage
+    println!("  {BOLD}Usage:{RESET}");
+    println!("    replay {CYAN}whoami{RESET}                 Show authenticated user");
+    println!(
+        "    replay {CYAN}upload{RESET}                 Upload sessions for current directory"
+    );
+    println!("    replay {CYAN}upload{RESET} {DIM}<session-id>{RESET}   Upload a specific session");
     println!();
-    println!("    replay {CYAN}whoami{RESET}");
-    println!();
-    println!("  Upload all sessions for the current directory:");
-    println!();
-    println!("    replay {CYAN}upload{RESET}");
-    println!();
-    println!("  Upload a specific session by ID:");
-    println!();
-    println!("    replay {CYAN}upload{RESET} {RED}<session-id>{RESET}");
 
     Ok(())
 }
@@ -280,13 +277,46 @@ fn run_upload(session_id: &str) -> Result<()> {
         .find(|s| s.id == session_id || s.title.as_deref() == Some(session_id))
         .ok_or_else(|| anyhow::anyhow!("Session '{}' not found", session_id))?;
 
+    let title = session
+        .title
+        .as_deref()
+        .or(session.first_user_message.as_deref())
+        .unwrap_or("(untitled)");
+    let title = truncate(title, 50);
+
+    eprint!("  {title} … ");
+
     let messages = load_session_messages(&providers, session)?;
     let loaded = LoadedSession {
         session: session.clone(),
         messages,
     };
-    uploader.upload(&loaded)?;
+    match uploader.upload(&loaded) {
+        Ok(outcome) => {
+            print_upload_outcome(&outcome);
+        }
+        Err(e) => {
+            eprintln!("{RED}failed{RESET}");
+            eprintln!("  {DIM}{e}{RESET}");
+            return Err(e);
+        }
+    }
     Ok(())
+}
+
+// ── upload output helpers ───────────────────────────────────────────────
+
+fn print_upload_outcome(outcome: &UploadOutcome) {
+    match outcome {
+        UploadOutcome::Created { url } => {
+            eprintln!("{GREEN}uploaded{RESET}");
+            eprintln!("  {CYAN}{url}{RESET}");
+        }
+        UploadOutcome::Updated { url } => {
+            eprintln!("{GREEN}updated{RESET}");
+            eprintln!("  {CYAN}{url}{RESET}");
+        }
+    }
 }
 
 // ── replay upload (interactive) ─────────────────────────────────────────
@@ -300,6 +330,7 @@ fn upload_sessions(
     let total = indices.len();
     let mut success = 0;
     let mut failed = 0;
+    let mut urls: Vec<String> = Vec::new();
 
     for (n, &idx) in indices.iter().enumerate() {
         let session = &sessions[idx];
@@ -319,28 +350,42 @@ fn upload_sessions(
                     messages,
                 };
                 match uploader.upload(&loaded) {
-                    Ok(()) => {
-                        eprintln!("{GREEN}ok{RESET}");
+                    Ok(outcome) => {
+                        let (label, url) = match outcome {
+                            UploadOutcome::Created { url } => ("uploaded", url),
+                            UploadOutcome::Updated { url } => ("updated", url),
+                        };
+                        eprintln!("{GREEN}{label}{RESET}");
+                        urls.push(url);
                         success += 1;
                     }
                     Err(e) => {
-                        eprintln!("{RED}failed{RESET} — {e}");
+                        eprintln!("{RED}failed{RESET} {DIM}— {e}{RESET}");
                         failed += 1;
                     }
                 }
             }
             Err(e) => {
-                eprintln!("{RED}failed{RESET} — {e}");
+                eprintln!("{RED}failed{RESET} {DIM}— {e}{RESET}");
                 failed += 1;
             }
         }
     }
 
-    println!();
+    eprintln!();
     if failed == 0 {
-        println!("  {GREEN}All {success} session(s) uploaded.{RESET}");
+        eprintln!("  {GREEN}All {success} session(s) uploaded.{RESET}");
     } else {
-        println!("  {success} uploaded, {RED}{failed} failed{RESET}.");
+        eprintln!("  {success} uploaded, {RED}{failed} failed{RESET}.");
+    }
+
+    if !urls.is_empty() {
+        eprintln!();
+        for url in &urls {
+            eprintln!("  {CYAN}{url}{RESET}");
+        }
+        eprintln!();
+        eprintln!("  {DIM}{ITALIC}All sessions are private by default.{RESET}");
     }
 
     Ok(())
