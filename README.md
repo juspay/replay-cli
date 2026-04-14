@@ -1,53 +1,75 @@
-# Replay CLI
+# replay-cli
 
-A Rust CLI tool for browsing and uploading AI coding sessions from [Claude Code](https://claude.ai/code) and [Codex](https://openai.com/index/introducing-codex/).
-
-## Install
+Share your AI coding sessions. Upload a conversation from Claude Code or Codex, get a permanent link. That's it.
 
 ```bash
-cargo build --release
-# binary at target/release/replay
+curl -sSL https://install.replay.md | sh
+replay login
+replay              # browse sessions
+replay upload <id>  # share one
 ```
 
-## Usage
+Point it at your local Claude Code or Codex history and it gives you an interactive picker with fuzzy search, a readable conversation view, and a one-command upload to Replay — where the session becomes a browsable thread with inline diffs, tool calls, and the full back-and-forth.
 
-```bash
-replay              # Launch interactive TUI session browser (default)
-replay browse       # Same as above
-replay upload <id>  # Upload a session by ID
-replay login        # Authenticate with the Replay server
-replay logout       # Remove stored credentials
-replay whoami       # Show current authenticated user
-```
+## Features
 
-### TUI Controls
+- Interactive TUI for browsing local sessions across agents
+- Fuzzy search across session titles and content
+- Readable conversation view — messages, tool calls, diffs, thinking blocks
+- One-command upload to Replay with stable URLs
+- Browser-based auth flow (Better Auth)
 
-- **↑/↓** or **j/k** — navigate session list
-- **/** — fuzzy search sessions
-- **Enter** — view conversation
-- **q** / **Esc** — back / quit
-
-## Supported Agents
+## Supported agents
 
 | Agent | Session location |
 |-------|-----------------|
 | Claude Code | `~/.claude/projects/**/*.jsonl` |
 | Codex | `~/.codex/sessions/rollout-*.jsonl` |
 
-## Architecture
+Adding a new agent means implementing the `SessionProvider` trait — see `providers/`.
 
-- **CLI** — clap-based arg parsing (`cli.rs`)
-- **Providers** — pluggable `SessionProvider` trait for discovering and loading sessions
-- **Models** — `Session`, `Message`, `LoadedSession`, `Agent`, `Role`
-- **TUI** — ratatui + crossterm, Elm-style MVU pattern with fuzzy search via `nucleo-matcher`
-- **Upload** — HTTP upload to Replay server with auth
-- **Auth** — Browser-based Better Auth flow
-
-## Development
+## Commands
 
 ```bash
-cargo check          # Type-check
-cargo test           # Run tests
-cargo build          # Debug build
-cargo run            # Run (defaults to browse)
+replay              # Launch the TUI (default)
+replay browse       # Same as above
+replay upload <id>  # Upload a session by ID
+replay login        # Authenticate with the Replay server
+replay logout       # Remove stored credentials
+replay whoami       # Show the current authenticated user
+```
+
+### TUI controls
+
+- **↑/↓** or **j/k** — navigate
+- **/** — fuzzy search
+- **Enter** — open conversation
+- **q** / **Esc** — back / quit
+
+## Getting started
+
+```bash
+cargo build --release
+# binary at target/release/replay
+```
+
+Or for development:
+
+```bash
+cargo check         # type-check
+cargo test          # run tests
+cargo run           # run (defaults to browse)
+```
+
+## Project structure
+
+```
+src/
+  cli.rs            # clap arg parsing
+  main.rs           # command routing
+  providers/        # SessionProvider trait + Claude/Codex impls
+  models/           # Session, Message, Agent, Role
+  tui/              # ratatui UI — Elm-style MVU
+  upload/           # HTTP upload to the Replay server
+  auth/             # Better Auth browser flow
 ```
