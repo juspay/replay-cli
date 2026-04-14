@@ -1,8 +1,8 @@
 # replay-cli
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
-[![Release](https://img.shields.io/github/v/release/skillsynchq/replay-cli?color=stone)](https://github.com/skillsynchq/replay-cli/releases)
-[![Website](https://img.shields.io/badge/web-replay.md-stone)](https://replay.md)
+[![Release](https://img.shields.io/github/v/release/skillsynchq/replay-releases?label=release&color=78716c)](https://github.com/skillsynchq/replay-releases/releases)
+[![Website](https://img.shields.io/badge/web-replay.md-78716c)](https://replay.md)
 
 The command-line companion to [Replay](https://replay.md). Browse your local Claude Code and Codex sessions in a TUI, then upload the good ones to share as reviewable threads.
 
