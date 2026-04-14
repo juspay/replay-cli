@@ -2,7 +2,14 @@
 name = "replay-cli"
 version = "0.3.2"
 edition = "2021"
+description = "Share AI coding conversations as reviewable threads."
+authors = ["SkillSync"]
+license = "Apache-2.0"
+homepage = "https://replay.md"
 repository = "https://github.com/skillsynchq/replay-cli"
+readme = "README.md"
+keywords = ["cli", "tui", "claude-code", "codex", "ai"]
+categories = ["command-line-utilities", "development-tools"]
 
 [package.metadata.binstall]
 pkg-url = "https://github.com/skillsynchq/replay-releases/releases/download/v{ version }/{ name }-v{ version }-{ target }{ archive-suffix }"
