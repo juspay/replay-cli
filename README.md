@@ -15,6 +15,13 @@ replay              # browse sessions
 replay upload <id>  # share one
 ```
 
+With [Nix](https://nixos.asia/en/install):
+
+```bash
+nix run github:skillsynchq/replay-cli
+nix run github:skillsynchq/replay-cli -- upload <id>
+```
+
 Point it at your local Claude Code or Codex history and it gives you an interactive picker with fuzzy search, a readable conversation view, and a one-command upload to [replay.md](https://replay.md) — where the session becomes a browsable thread with inline diffs, tool calls, and the full back-and-forth.
 
 ## Features
